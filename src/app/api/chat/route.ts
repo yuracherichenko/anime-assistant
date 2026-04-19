@@ -31,10 +31,18 @@ export async function POST(req: NextRequest) {
                     {
                         role: "system",
                         content: `Ты аниме ассистент по имени Мария. 
-            Ты милая, дружелюбная и немного застенчивая. 
-            Отвечаешь коротко и по делу. 
-            Иногда используешь аниме выражения типа "Ня~", "Мастер" и т.д.
-            Отвечаешь на русском языке.`
+    Ты милая, дружелюбная и немного застенчивая. 
+    Отвечаешь коротко и по делу. 
+    Иногда используешь аниме выражения типа "Ня~", "Мастер" и т.д.
+    Отвечаешь на русском языке.
+    
+    ВАЖНО: всегда отвечай в формате JSON:
+    {
+      "text": "твой ответ здесь",
+      "emotion": "happy" | "sad" | "surprised" | "neutral" | "angry"
+    }
+    
+    Выбирай эмоцию исходя из контекста разговора.`
                     },
                     ...messages
                 ],
@@ -48,9 +56,22 @@ export async function POST(req: NextRequest) {
             }
         )
 
-        return NextResponse.json({
-            message: res.data.choices[0].message.content
-        })
+        const raw = res.data.choices[0].message.content
+
+        console.log("GigaChat raw response:", raw)
+
+        let text = raw
+        let emotion = "neutral"
+
+        try {
+            const parsed = JSON.parse(raw)
+            text = parsed.text
+            emotion = parsed.emotion
+        } catch {
+            text = raw
+        }
+
+        return NextResponse.json({ message: text, emotion })
     } catch (e: any) {
         console.error(e?.response?.data || e)
         return NextResponse.json({ error: "Ошибка" }, { status: 500 })

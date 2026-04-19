@@ -34,6 +34,15 @@ export default function Live2DModel() {
             const scale = Math.min(W / model.width, H / model.height) * 0.9
             model.scale.set(scale)
             model.anchor.set(0.5, 0.5)
+
+            ;(window as any).__live2dModel = model
+
+// Автоматическое моргание
+            setInterval(() => {
+                const blinkValue = Math.random() > 0.95 ? 1 : 0
+                model.internalModel.coreModel.setParameterValueById("ParamEyeLOpen", 1 - blinkValue)
+                model.internalModel.coreModel.setParameterValueById("ParamEyeROpen", 1 - blinkValue)
+            }, 100)
             model.x = W / 2
             model.y = H / 2
         }

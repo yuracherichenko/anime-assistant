@@ -11,14 +11,16 @@ interface Message {
 
 interface Props {
     onMessage?: (text: string) => void
+    onEmotion?: (emotion: string) => void
 }
 
-export default function Chat({ onMessage }: Props) {
+export default function Chat({ onMessage, onEmotion }: Props) {
     const [messages, setMessages] = useState<Message[]>([])
     const [input, setInput] = useState("")
     const [loading, setLoading] = useState(false)
     const bottomRef = useRef<HTMLDivElement>(null)
     const [listening, setListening] = useState(false)
+    const [voiceEnabled, setVoiceEnabled] = useState(true)
 
     function startListening() {
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -43,12 +45,109 @@ export default function Chat({ onMessage }: Props) {
         recognition.start()
     }
 
-    function speak(text: string) {
-        const utterance = new SpeechSynthesisUtterance(text)
-        utterance.lang = "ru-RU"
-        utterance.rate = 1.1
-        utterance.pitch = 1.3
-        window.speechSynthesis.speak(utterance)
+    async function speak(text: string) {
+        if (!voiceEnabled) return
+
+        try {
+            const res = await fetch("http://localhost:8765", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text }),
+            })
+            const data = await res.json()
+
+            // Декодируем base64 в аудио
+            const audioBytes = atob(data.audio)
+            const arrayBuffer = new ArrayBuffer(audioBytes.length)
+            const view = new Uint8Array(arrayBuffer)
+            for (let i = 0; i < audioBytes.length; i++) {
+                view[i] = audioBytes.charCodeAt(i)
+            }
+
+            const audioContext = new AudioContext()
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+            const source = audioContext.createBufferSource()
+            source.buffer = audioBuffer
+            source.connect(audioContext.destination)
+
+            // Анимация рта
+            const model = (window as any).__live2dModel
+            let mouthInterval: any = null
+
+            source.onended = () => {
+                if (mouthInterval) clearInterval(mouthInterval)
+                if (model) {
+                    model.internalModel.coreModel.setParameterValueById("ParamMouthOpenY", 0)
+                }
+            }
+
+            if (model) {
+                mouthInterval = setInterval(() => {
+                    const open = Math.random() * 0.8 + 0.2 // от 0.2 до 1.0, не закрывается полностью
+                    try {
+                        model.internalModel.coreModel.setParameterValueById("ParamMouthOpenY", open)
+                        model.internalModel.coreModel.setParameterValueById("ParamMouthForm", 0.5)
+                    } catch(e) {
+                        console.log("mouth param error:", e)
+                    }
+                }, 100) // быстрее — 100ms вместо 150ms
+            }
+
+            source.start()
+        } catch (e) {
+            console.error("TTS ошибка:", e)
+            // Фолбэк на Web Speech API
+            const utterance = new SpeechSynthesisUtterance(text)
+            utterance.lang = "ru-RU"
+            utterance.pitch = 1.8
+            window.speechSynthesis.speak(utterance)
+        }
+    }
+
+    let emotionInterval: any = null
+
+    function applyEmotion(emotion: string) {
+
+
+        const model = (window as any).__live2dModel
+        if (!model) return
+
+        // Останавливаем предыдущий интервал
+        if (emotionInterval) clearInterval(emotionInterval)
+
+        const core = model.internalModel.coreModel
+
+        const applyParams = () => {
+            switch(emotion) {
+                case "happy":
+                    core.setParameterValueById("ParamEyeLSmile", 1)
+                    core.setParameterValueById("ParamEyeRSmile", 1)
+                    core.setParameterValueById("ParamMouthForm", 1)
+                    core.setParameterValueById("ParamAngleZ", 15) // наклон головы
+                    break
+                case "sad":
+                    core.setParameterValueById("ParamBrowLY", -1)
+                    core.setParameterValueById("ParamMouthForm", -1)
+                    core.setParameterValueById("ParamAngleZ", -10)
+                    break
+                case "surprised":
+                    core.setParameterValueById("ParamBrowLY", 1)
+                    core.setParameterValueById("ParamAngleY", 15)
+                    break
+                case "angry":
+                    core.setParameterValueById("ParamBrowLY", -1)
+                    core.setParameterValueById("ParamAngleX", -10)
+                    break
+            }
+        }
+
+        // Применяем каждые 16ms (60fps)
+        emotionInterval = setInterval(applyParams, 16)
+
+        // Через 3 секунды останавливаем
+        setTimeout(() => {
+            clearInterval(emotionInterval)
+        }, 3000)
     }
 
     useEffect(() => {
@@ -71,11 +170,16 @@ export default function Chat({ onMessage }: Props) {
                 body: JSON.stringify({ messages: newMessages }),
             })
             const data = await res.json()
+
+            console.log("data from API:", data)
+
             const assistantMessage: Message = {
                 role: "assistant",
                 content: data.message,
             }
             setMessages(prev => [...prev, assistantMessage])
+            applyEmotion(data.emotion)
+            onEmotion?.(data.emotion)
             speak(data.message)
         } catch (e) {
             console.error(e)
@@ -87,10 +191,17 @@ export default function Chat({ onMessage }: Props) {
     return (
         <div className="flex flex-col h-full p-4 gap-4">
             {/* Имя персонажа */}
-            <div className="text-center">
+            <div className="text-center flex items-center justify-center gap-3">
                 <h2 className="text-xl font-bold text-purple-400">Мария</h2>
-                <p className="text-xs text-zinc-500">Аниме ассистент</p>
+                <button
+                    onClick={() => setVoiceEnabled(prev => !prev)}
+                    className="text-zinc-400 hover:text-white text-lg"
+                    title={voiceEnabled ? "Выключить голос" : "Включить голос"}
+                >
+                    {voiceEnabled ? "🔊" : "🔇"}
+                </button>
             </div>
+
 
             {/* Сообщения */}
             <div className="flex-1 overflow-y-auto flex flex-col gap-3">
